@@ -1,0 +1,7 @@
+stage('Maven Build') {
+  steps {
+    dir('snakeo') {
+      sh 'mvn clean package'
+    }
+  }
+}
