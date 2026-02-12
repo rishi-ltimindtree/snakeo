@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: demo-app
-          image: demo-app:1.0
+          image: 983426484039.dkr.ecr.ap-south-1.amazonaws.com/myrepo:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080 
