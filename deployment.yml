@@ -19,5 +19,5 @@ spec:
           image: demo-app:1.0
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8080
+            - containerPort: 8080 
          
