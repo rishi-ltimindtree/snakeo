@@ -1,24 +1,97 @@
-name: CI Pipeline
+name: Build JAR -> Push to ECR -> Deploy to ECS
 
 on:
   push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
+    branches: [ "main" ]
+  workflow_dispatch:
+
+# Needed for OIDC (recommended) with aws-actions/configure-aws-credentials
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1                 # change if needed
+  ECR_REPOSITORY: snakeo                 # your ECR repo name (NOT the full URL)
+  ECS_CLUSTER: my-ecs-cluster            # your ECS cluster name
+  ECS_SERVICE: my-ecs-service            # your ECS service name
+  ECS_TASK_DEFINITION: .aws/task-definition.json  # commit this file in repo
+  CONTAINER_NAME: app                    # container name inside task-definition.json
 
 jobs:
-  build:
+  build_push_deploy:
     runs-on: ubuntu-latest
+    # If you want to run on your self-hosted runner instead, replace with:
+    # runs-on: [self-hosted, dev]
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Checkout source
+        uses: actions/checkout@v5
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      # ----- Build JAR (Maven) -----
+      - name: Set up JDK (with Maven cache)
+        uses: actions/setup-java@v4
         with:
-          node-version: '20'
+          distribution: temurin
+          java-version: "17"
+          cache: maven
 
+      - name: Build JAR
+        run: mvn -B -DskipTests package
+
+      # ----- Authenticate to AWS -----
+      # Recommended: OIDC role assumption (no long-lived AWS keys in GitHub)
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Alternative (NOT recommended): long-lived keys
+      # - name: Configure AWS credentials (Access Keys)
+      #   uses: aws-actions/configure-aws-credentials@v4
+      #   with:
+      #     aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #     aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      #     aws-region: ${{ env.AWS_REGION }}
+
+      # ----- Login to ECR -----
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # ----- Build & Push Docker Image -----
+      - name: Build, tag, and push image to ECR
+        id: build-image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          IMAGE_URI="$REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG"
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_OUTPUT
+
+          # Dockerfile should copy your JAR (example: target/*.jar)
+          docker build -t "$IMAGE_URI" .
+
+          docker push "$IMAGE_URI"
+
+      # ----- Update ECS task definition with new image -----
+      - name: Render ECS task definition (inject new image)
+        id: render-task
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ env.ECS_TASK_DEFINITION }}
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ steps.build-image.outputs.IMAGE_URI }}
+
+      # ----- Deploy to ECS -----
+      - name: Deploy to Amazon ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-task.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
       - name: Install dependencies
         run: npm install
 
