@@ -19,11 +19,7 @@ jobs:
 
       IMAGE_TAG: latest
 
-      # AWS long-lived keys (NOT RECOMMENDED to keep in YAML)
-      AWS_ACCESS_KEY_ID: "AKIAxxxxxxxxxxxxxxxx"
-      AWS_SECRET_ACCESS_KEY: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-      # --------------------------------------------------------
-
+    
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
