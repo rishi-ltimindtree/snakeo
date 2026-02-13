@@ -1,0 +1,42 @@
+name: Build WAR and Push Docker Image to ECR
+
+on:
+  push:
+    branches: [master] 
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: [self-hosted, dev]
+    environment: ECR Secrets
+    env:
+      IMAGE_TAG: latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Make build.sh executable
+        run: chmod +x build.sh
+
+      - name: Build WAR
+        run: ./build.sh # Ensure ROOT.war is at repo root or update Dockerfile COPY path
+
+      - name: Debug secrets (check for whitespace)
+        run: |
+          echo "REGISTRY=[${{ secrets.ECR_REGISTRY }}]"
+          echo "REPOSITORY=[${{ secrets.ECR_REPOSITORY }}]"
+          echo "REGION=[${{ secrets.AWS_REGION }}]"
+
+      - name: Login to Amazon ECR
+        run: aws ecr get-login-password --region "${{ secrets.AWS_REGION }}" | docker login --username AWS --password-stdin "${{ secrets.ECR_REGISTRY }}"
+
+      - name: Build Docker image (Tomcat + WAR) with full ECR name
+        run: docker build -t "${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${IMAGE_TAG}" .
+
+      - name: Push image to ECR
+        run: docker push "${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${IMAGE_TAG}"
+
+      - name: Remove old container and run new one
+        run: |
+          docker rm -f tomcat-app || true
+          docker run -d --name tomcat-app -p 8080:8080 my-tomcat-app:latest
