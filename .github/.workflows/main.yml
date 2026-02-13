@@ -1,0 +1,180 @@
+name: CI-CD | Build Artifact + Push to ECR + Deploy
+
+on:
+  push:
+    branches: [ "master" ]
+  workflow_dispatch:
+
+concurrency:
+  group: prod-deploy
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: ap-south-1                 # change if needed
+  IMAGE_TAG_LATEST: latest
+  CONTAINER_NAME: tomcat-app             # container name on EC2
+  APP_PORT: "8080"                       # host port
+  CONTAINER_PORT: "8080"                 # container port
+
+jobs:
+  build_push_deploy:
+    # IMPORTANT:
+    # - Use your self-hosted runner label(s).
+    # - Example from your notes: [self-hosted, dev] [2](https://outlook.office365.com/owa/?ItemID=AAMkADM4ZGEzN2YxLWZhZWUtNDFmMS05ZDdmLWQwZWRkNzk3YWZjMQBGAAAAAADLzruj4EjdRZs6nfKi1OZ%2fBwA15rDmutskQ7vXUcH7GlfGAAAAAAEJAAA15rDmutskQ7vXUcH7GlfGAAAbOuSCAAA%3d&exvsurl=1&viewmodel=ReadMessageItem)
+    runs-on: [ self-hosted, dev ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show runner context (debug)
+        shell: bash
+        run: |
+          set -e
+          echo "Runner: $RUNNER_NAME"
+          echo "OS: $RUNNER_OS"
+          echo "Workspace: $GITHUB_WORKSPACE"
+          uname -a || true
+          id || true
+
+      # ---------------------------
+      # 1) BUILD ARTIFACT (WAR)
+      # ---------------------------
+      # If your project is not Maven/Java WAR, replace this section with your build commands.
+      - name: Setup Java 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "8"
+
+      - name: Build WAR (Maven)
+        shell: bash
+        run: |
+          set -e
+          if [ -f "pom.xml" ]; then
+            mvn -B -DskipTests clean package
+          elif [ -x "./build.sh" ]; then
+            chmod +x ./build.sh
+            ./build.sh
+          else
+            echo "No pom.xml or build.sh found. Please add build steps."
+            exit 1
+          fi
+
+      - name: Locate WAR and copy to ROOT.war (for Docker build)
+        shell: bash
+        run: |
+          set -e
+          # Try common Maven output location
+          WAR_PATH="$(ls -1 target/*.war 2>/dev/null | head -n 1 || true)"
+          if [ -z "$WAR_PATH" ]; then
+            # Try repo root as fallback
+            WAR_PATH="$(ls -1 *.war 2>/dev/null | head -n 1 || true)"
+          fi
+          if [ -z "$WAR_PATH" ]; then
+            echo "WAR not found. Ensure your build produces a .war file."
+            exit 1
+          fi
+          echo "Found WAR: $WAR_PATH"
+          cp -f "$WAR_PATH" ROOT.war
+          ls -al ROOT.war
+
+      - name: Upload build artifact (WAR)
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-war
+          path: ROOT.war
+          if-no-files-found: error
+          retention-days: 7
+
+      # ---------------------------
+      # 2) AUTH WITH AWS (NO SECRETS)
+      # ---------------------------
+      - name: Verify AWS identity from EC2 IAM role
+        shell: bash
+        run: |
+          set -e
+          aws --version
+          aws sts get-caller-identity
+
+      # ---------------------------
+      # 3) BUILD & PUSH IMAGE TO ECR
+      # ---------------------------
+      - name: Derive ECR registry and repository
+        id: ecrvars
+        shell: bash
+        run: |
+          set -e
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          echo "AWS_ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
+
+          # You can hardcode repository name here (recommended for stability)
+          # Example: myapp or tomcat-snake
+          REPO_NAME="myrepo"
+          echo "ECR_REPOSITORY=$REPO_NAME" >> $GITHUB_ENV
+
+          REGISTRY="$983426484039.dkr.ecr.ap-south-1.amazonaws.com"
+          echo "ECR_REGISTRY=$REGISTRY" >> $GITHUB_ENV
+
+          IMAGE_URI="${REGISTRY}/${REPO_NAME}"
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+
+          echo "Using registry: $REGISTRY"
+          echo "Using repo:     $REPO_NAME"
+          echo "Image URI:      $IMAGE_URI"
+
+      - name: Ensure ECR repository exists (create if missing)
+        shell: bash
+        run: |
+          set -e
+          aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" --region "$AWS_REGION" >/dev/null 2>&1 \
+            || aws ecr create-repository --repository-name "$ECR_REPOSITORY" --region "$AWS_REGION" >/dev/null
+
+      - name: Login to Amazon ECR (via IAM role)
+        shell: bash
+        run: |
+          set -e
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+      - name: Build Docker image
+        shell: bash
+        run: |
+          set -e
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
+
+          # Dockerfile must COPY ROOT.war into the image (typical Tomcat image pattern).
+          # If your Dockerfile expects a different path/name, update accordingly.
+          docker build -t "${IMAGE_URI}:${SHORT_SHA}" -t "${IMAGE_URI}:${IMAGE_TAG_LATEST}" .
+
+      - name: Push Docker image to ECR
+        shell: bash
+        run: |
+          set -e
+          docker push "${IMAGE_URI}:${SHORT_SHA}"
+          docker push "${IMAGE_URI}:${IMAGE_TAG_LATEST}"
+
+      # ---------------------------
+      # 4) DEPLOY (simple EC2 container restart)
+      # ---------------------------
+      - name: Deploy on runner (pull latest and restart container)
+        shell: bash
+        run: |
+          set -e
+
+          echo "Pulling latest image..."
+          docker pull "${IMAGE_URI}:${IMAGE_TAG_LATEST}"
+
+          echo "Stopping old container (if any)..."
+          docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+
+          echo "Starting new container..."
+          docker run -d \
+            --name "${CONTAINER_NAME}" \
+            -p "${APP_PORT}:${CONTAINER_PORT}" \
+            --restart unless-stopped \
+            "${IMAGE_URI}:${IMAGE_TAG_LATEST}"
+
+          echo "Deployment complete."
+          docker ps --filter "name=${CONTAINER_NAME}"

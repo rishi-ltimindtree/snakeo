@@ -1,9 +1,5 @@
-FROM eclipse-temurin:17-jre
-
-WORKDIR /app
-
-COPY target/demo-app-1.0-SNAPSHOT.jar /app/app.jar
-
-EXPOSE 8080
-
-CMD ["java","-jar","/app/app.jar"]
+FROM tomcat:8.0
+LABEL "Owner"="TOMCAT"
+RUN rm -rf /usr/local/tomcat/webapps/*
+COPY ROOT.war /usr/local/tomcat/webapps
+CMD ["catalina.sh", "run"]
