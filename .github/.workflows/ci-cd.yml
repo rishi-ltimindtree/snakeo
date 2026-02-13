@@ -2,16 +2,27 @@ name: Build WAR and Push Docker Image to ECR
 
 on:
   push:
-    branches: [ master]
+    branches: [ master ]
   workflow_dispatch:
 
 jobs:
   build-and-push:
     runs-on: [self-hosted, dev]
-    environment: ECR Secrets
 
     env:
+      # --------- HARD-CODED VALUES (NOT RECOMMENDED) ----------
+      AWS_REGION: ap-south-1
+
+      # Your ECR registry: <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com
+      ECR_REGISTRY: "983426484039.dkr.ecr.ap-south-1.amazonaws.com"
+      ECR_REPOSITORY: "myrepo"
+
       IMAGE_TAG: latest
+
+      # AWS long-lived keys (NOT RECOMMENDED to keep in YAML)
+      AWS_ACCESS_KEY_ID: "AKIAxxxxxxxxxxxxxxxx"
+      AWS_SECRET_ACCESS_KEY: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      # --------------------------------------------------------
 
     steps:
       - name: Checkout source code
@@ -22,24 +33,27 @@ jobs:
 
       - name: Build WAR
         run: ./build.sh
-        # Ensure ROOT.war is at repo root or update Dockerfile COPY path
 
-      - name: Debug secrets (check for whitespace)
+      - name: Configure AWS CLI credentials (from env)
         run: |
-          echo "REGISTRY=[${{ secrets.ECR_REGISTRY }}]"
-          echo "REPOSITORY=[${{ secrets.ECR_REPOSITORY }}]"
-          echo "REGION=[${{ secrets.AWS_REGION }}]"
+          aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+          aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
+          aws configure set region "$AWS_REGION"
 
       - name: Login to Amazon ECR
-        run: aws ecr get-login-password --region "${{ secrets.AWS_REGION }}" | docker login --username AWS --password-stdin "${{ secrets.ECR_REGISTRY }}"
+        run: |
+          aws ecr get-login-password --region "$AWS_REGION" \
+          | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
-      - name: Build Docker image (Tomcat + WAR) with full ECR name
-        run: docker build -t "${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${IMAGE_TAG}" .
+      - name: Build Docker image (Tomcat + WAR)
+        run: |
+          docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" .
 
       - name: Push image to ECR
-        run: docker push "${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${IMAGE_TAG}"
+        run: |
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
-- name: Remove old container and run new one
-  run: |
-    docker rm -f tomcat-app || true
-    docker run -d --name tom
+      - name: Remove old container and run new one
+        run: |
+          docker rm -f tomcat-app || true
+          docker run -d --name tomcat-app -p 8080:8080 "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
