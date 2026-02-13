@@ -2,7 +2,7 @@ name: Build JAR -> Push to ECR -> Deploy to ECS
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "master" ]
   workflow_dispatch:
 
 # Needed for OIDC (recommended) with aws-actions/configure-aws-credentials
