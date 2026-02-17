@@ -1,5 +1,5 @@
-FROM eclipse-temurin:17-jdk
-WORKDIR /app
-COPY app.jar app.jar
+FROM tomcat:9-jdk17
+COPY target/*.war /usr/local/tomcat/webapps/ROOT.war
+
 EXPOSE 8080
 CMD ["sh","-c","sleep 3600"]
