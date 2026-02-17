@@ -1,5 +1,5 @@
-FROM tomcat:9-jdk17-temurin
-RUN rm -rf /usr/local/tomcat/webapps/*
-COPY ROOT.war /usr/local/tomcat/webapps/ROOT.war
+FROM eclipse-temurin:17-jdk
+WORKDIR /app
+COPY app.jar app.jar
 EXPOSE 8080
-CMD ["catalina.sh","run"]
+ENTRYPOINT ["java","-jar","app.jar"]
