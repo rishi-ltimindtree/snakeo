@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: tomcat-java-app
+  name: tomcat-java-app 
   labels:
     app: tomcat-java-app
 spec:
