@@ -1,23 +1,22 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: demo-app
+  name: tomcat-java-app
   labels:
-    app: demo-app
+    app: tomcat-java-app
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: demo-app
+      app: tomcat-java-app
   template:
     metadata:
       labels:
-        app: demo-app
+        app: tomcat-java-app
     spec:
       containers:
-        - name: demo-app
+        - name: myrepo
           image: 983426484039.dkr.ecr.ap-south-1.amazonaws.com/myrepo:latest
-          imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8080 
-         
+            - containerPort: 8080
+          imagePullPolicy: Always
