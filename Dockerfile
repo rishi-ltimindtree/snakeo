@@ -1,6 +1,5 @@
-FROM tomcat:9-jdk17
-LABEL Owner="TOMCAT"
-RUN rm -rf /usr/local/tomcat/webapps/*
-COPY target/ROOT.war /usr/local/tomcat/webapps/ROOT.war
+FROM eclipse-temurin:17-jdk
+WORKDIR /app
+COPY app.jar app.jar
 EXPOSE 8080
-CMD ["catalina.sh", "run"]
+CMD ["java","-jar","app.jar"]
