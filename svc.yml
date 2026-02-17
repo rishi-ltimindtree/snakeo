@@ -1,14 +1,11 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: demo-app-service
-  labels:
-    app: demo-app
+  name: tomcat-java-app-svc
 spec:
-  selector:
-    app: demo-app
-  ports:
-    - protocol: TCP
-      port: 80
-      targetPort: 8080
   type: LoadBalancer
+  selector:
+    app: tomcat-java-app
+  ports:
+    - port: 80
+      targetPort: 8080
